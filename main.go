@@ -26,14 +26,14 @@ func init() {
 }
 
 type PageResult struct {
-	page      string
-	status    int
-	nestLevel int
-	isValid   bool
-	linksFrom []string
+	Page      string   `json:"page"`
+	Status    int      `json:"status"`
+	NestLevel int      `json:"nestLevel"`
+	IsValid   bool     `json:"isValid"`
+	LinksFrom []string `json:"linksFrom"`
 }
 
-var resultStorage = make(map[string]PageResult)
+var resultStorage = make(map[string]*PageResult)
 
 func check(e error) {
 	if e != nil {
@@ -51,30 +51,28 @@ func main() {
 	defer f.Close()
 	_, err = f.Write(resJson)
 	check(err)
-
 	fmt.Printf("%+v\n", resultStorage)
-
 }
 
 func ParseURL(url string, level int) {
 
 	fmt.Printf("Checking %s\n", url)
 
-	var result = PageResult{page: url, status: 0, nestLevel: level, isValid: true}
-	resultStorage[url] = result
+	var result = PageResult{Page: url, Status: 0, NestLevel: level, IsValid: true}
+	resultStorage[url] = &result
 	//resultStorage[url] = &result
 
 	resp, err := http.Get(url)
 	if err != nil {
 		fmt.Printf("http.Get caused an error on %s", url)
-		result.isValid = false
+		result.IsValid = false
 		return
 	}
 	defer resp.Body.Close()
-	result.status = resp.StatusCode
+	result.Status = resp.StatusCode
 	if math.Round(float64(resp.StatusCode/100)) != 2 {
 		//fmt.Printf("status code error: %d %s", resp.StatusCode, resp.Status)
-		result.isValid = false
+		result.IsValid = false
 		return
 	}
 
@@ -90,7 +88,7 @@ func ParseURL(url string, level int) {
 	}
 
 	doc.Find("a").Each(func(i int, s *goquery.Selection) {
-		if i > 20 {
+		if i > 10 {
 			return
 		}
 		link, err := s.Attr("href")
@@ -102,7 +100,7 @@ func ParseURL(url string, level int) {
 			if valid {
 				_, urlWasChecked := resultStorage[parsedLink]
 				if urlWasChecked {
-					//resultStorage[parsedLink].linksFrom = append(resultStorage[parsedLink].linksFrom, url)
+					resultStorage[parsedLink].LinksFrom = append(resultStorage[parsedLink].LinksFrom, url)
 				} else {
 					ParseURL(parsedLink, nextLevel)
 				}
