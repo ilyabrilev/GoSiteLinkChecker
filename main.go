@@ -5,7 +5,11 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"os/signal"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"encoding/json"
 	"os"
@@ -14,14 +18,16 @@ import (
 )
 
 var (
-	SITEURL        string = "http://lenta.ru"
-	CHECKING_PAGE  string = "/"
-	MAX_NEST_LEVEL int    = 3
+	SITEURL            string = "http://lenta.ru"
+	CHECKING_PAGE      string = "/"
+	MAX_NEST_LEVEL     int    = 3
+	SECONDS_TO_TIMEOUT int    = 30
 )
 
 //разбор аргументов командной строки
 func init() {
 	flag.StringVar(&SITEURL, "s", SITEURL, "URL сайта")
+	flag.StringVar(&SITEURL, "p", SITEURL, "Страница для просмотра")
 	flag.IntVar(&MAX_NEST_LEVEL, "mn", MAX_NEST_LEVEL, "Максимальная глубина")
 }
 
@@ -33,7 +39,10 @@ type PageResult struct {
 	LinksFrom []string `json:"linksFrom"`
 }
 
+var resultMutex = &sync.Mutex{}
 var resultStorage = make(map[string]*PageResult)
+
+var activeWorkers int64
 
 func check(e error) {
 	if e != nil {
@@ -42,21 +51,65 @@ func check(e error) {
 }
 
 func main() {
-	flag.Parse()
-	ParseURL(SITEURL+CHECKING_PAGE, 0)
 
-	resJson, _ := json.Marshal(resultStorage)
-	f, err := os.Create("./dat1.txt")
-	check(err)
-	defer f.Close()
-	_, err = f.Write(resJson)
-	check(err)
-	fmt.Printf("%+v\n", resultStorage)
+	flag.Parse()
+
+	key_chan := make(chan os.Signal, 1)
+	signal.Notify(key_chan, os.Interrupt)
+
+	//notifChan := make(chan string)
+	workersAreOver := make(chan string)
+
+	timeoutTimer := time.NewTimer(time.Duration(SECONDS_TO_TIMEOUT) * time.Second)
+
+	go ParseURL(SITEURL+CHECKING_PAGE, 0)
+
+	//workersCheckChan := make(chan bool, 1)
+
+	for {
+		select {
+		/*
+			case notif := <-notifChan:
+				fmt.Println(notif)
+		*/
+		case <-key_chan:
+			fmt.Println("Stoped by Ctr+C!")
+			resJson, _ := json.Marshal(resultStorage)
+			f, err := os.Create("./dat1.txt")
+			check(err)
+			defer f.Close()
+			_, err = f.Write(resJson)
+			check(err)
+			fmt.Printf("%+v\n", resultStorage)
+			fmt.Scan()
+			return
+		case <-workersAreOver:
+			fmt.Scan()
+			return
+		case <-timeoutTimer.C:
+			fmt.Println("Stoped by timeout!")
+			fmt.Scan()
+			return
+		}
+	}
+}
+
+func RunWorkersCheck(exitChan chan bool) {
+	time.Sleep(1600 * time.Millisecond)
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	go func() {
+		for t := range ticker.C {
+			fmt.Println("Tick at", t)
+		}
+	}()
 }
 
 func ParseURL(url string, level int) {
+	atomic.AddInt64(&activeWorkers, 1)
+	defer atomic.AddInt64(&activeWorkers, -1)
 
-	fmt.Printf("Checking %s\n", url)
+	fmt.Printf("Checking %s, nest level %v, active workers %v\n", url, level, activeWorkers)
 
 	var result = PageResult{Page: url, Status: 0, NestLevel: level, IsValid: true}
 	resultStorage[url] = &result
