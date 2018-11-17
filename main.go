@@ -45,6 +45,8 @@ type PageResult struct {
 	LinksFrom []string `json:"linksFrom"`
 }
 
+var closeFlag = false
+
 var resultMutex = &sync.Mutex{}
 var resultStorage = make(map[string]*PageResult)
 
@@ -94,6 +96,7 @@ func main() {
 }
 
 func LogResult() {
+	closeFlag = true
 	resultMutex.Lock()
 	resJson, _ := json.Marshal(resultStorage)
 	f, err := os.Create("./dat1.txt")
@@ -134,6 +137,10 @@ func CheckIfWorkersAreOver(url string) {
 }
 
 func ParseURL(url string, level int) {
+	if closeFlag {
+		return
+	}
+
 	atomic.AddInt64(&activeWorkers, 1)
 	defer CheckIfWorkersAreOver(url)
 
@@ -168,44 +175,48 @@ func ParseURL(url string, level int) {
 	}
 
 	doc.Find("a").Each(func(i int, s *goquery.Selection) {
-		if i > 30 {
-			return
-		}
-		link, err := s.Attr("href")
-		if err == false {
-			//нужно ли оповещать о пустых ссылках?
-			//fmt.Println(link, err)
-			resultMutex.Lock()
-			_, urlWasChecked := resultStorage[link]
-			if urlWasChecked {
-				resultStorage[link].LinksFrom = append(resultStorage[link].LinksFrom, url)
-			} else {
-				var errResult = PageResult{Page: link, Status: 0, NestLevel: level, IsValid: false}
-				resultStorage[link] = &errResult
-				resultStorage[link].LinksFrom = append(resultStorage[link].LinksFrom, url)
-			}
-			resultMutex.Unlock()
-		} else {
-			parsedLink, valid := GetLink(link)
-
-			var realNextLevel = nextLevel
-			if !valid && !IGNORE_EXTERNAL_LINKS {
-				realNextLevel = MAX_NEST_LEVEL
-			}
-
-			if valid || !IGNORE_EXTERNAL_LINKS {
-				resultMutex.Lock()
-				_, urlWasChecked := resultStorage[parsedLink]
-				if urlWasChecked {
-					resultStorage[parsedLink].LinksFrom = append(resultStorage[parsedLink].LinksFrom, url)
-					resultMutex.Unlock()
-				} else {
-					resultMutex.Unlock()
-					go ParseURL(parsedLink, realNextLevel)
-				}
-			}
-		}
+		ParseLinkTag(i, s, result, nextLevel)
 	})
+}
+
+func ParseLinkTag(i int, s *goquery.Selection, localResult PageResult, nextLevel int) {
+	if i > 30 {
+		return
+	}
+	link, err := s.Attr("href")
+	if err == false {
+		//нужно ли оповещать о пустых ссылках?
+		//fmt.Println(link, err)
+		resultMutex.Lock()
+		_, urlWasChecked := resultStorage[link]
+		if urlWasChecked {
+			resultStorage[link].LinksFrom = append(resultStorage[link].LinksFrom, localResult.Page)
+		} else {
+			var errResult = PageResult{Page: link, Status: 0, NestLevel: localResult.NestLevel + 1, IsValid: false}
+			resultStorage[link] = &errResult
+			resultStorage[link].LinksFrom = append(resultStorage[link].LinksFrom, localResult.Page)
+		}
+		resultMutex.Unlock()
+	} else {
+		parsedLink, valid := GetLink(link)
+
+		var realNextLevel = nextLevel
+		if !valid && !IGNORE_EXTERNAL_LINKS {
+			realNextLevel = MAX_NEST_LEVEL
+		}
+
+		if valid || !IGNORE_EXTERNAL_LINKS {
+			resultMutex.Lock()
+			_, urlWasChecked := resultStorage[parsedLink]
+			if urlWasChecked {
+				resultStorage[parsedLink].LinksFrom = append(resultStorage[parsedLink].LinksFrom, localResult.Page)
+				resultMutex.Unlock()
+			} else {
+				resultMutex.Unlock()
+				go ParseURL(parsedLink, realNextLevel)
+			}
+		}
+	}
 }
 
 func GetLink(raw string) (string, bool) {
