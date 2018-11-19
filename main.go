@@ -45,6 +45,12 @@ type PageResult struct {
 	LinksFrom []string `json:"linksFrom"`
 }
 
+type LinkDecision struct {
+	IsValid       bool
+	Link          string
+	NextNestLevel int
+}
+
 var closeFlag = false
 
 var resultMutex = &sync.Mutex{}
@@ -66,8 +72,6 @@ func main() {
 	key_chan := make(chan os.Signal, 1)
 	signal.Notify(key_chan, os.Interrupt)
 
-	//notifChan := make(chan string)
-
 	timeoutTimer := time.NewTimer(time.Duration(SECONDS_TO_TIMEOUT) * time.Second)
 
 	go ParseURL(SITEURL+CHECKING_PAGE, 0)
@@ -75,10 +79,6 @@ func main() {
 
 	for {
 		select {
-		/*
-			case notif := <-notifChan:
-				fmt.Println(notif)
-		*/
 		case <-key_chan:
 			fmt.Println("Stoped by Ctr+C!")
 			LogResult()
@@ -136,6 +136,7 @@ func CheckIfWorkersAreOver(url string) {
 	}
 }
 
+//ToDo: maybe it's worth sending a PageResult into this func instead of string and integer
 func ParseURL(url string, level int) {
 	if closeFlag {
 		return
@@ -198,25 +199,53 @@ func ParseLinkTag(i int, s *goquery.Selection, localResult PageResult, nextLevel
 		}
 		resultMutex.Unlock()
 	} else {
-		parsedLink, valid := GetLink(link)
 
-		var realNextLevel = nextLevel
-		if !valid && !IGNORE_EXTERNAL_LINKS {
-			realNextLevel = MAX_NEST_LEVEL
-		}
+		var linkDecision = GetLinkDecision(link, nextLevel)
 
-		if valid || !IGNORE_EXTERNAL_LINKS {
+		if linkDecision.IsValid {
 			resultMutex.Lock()
-			_, urlWasChecked := resultStorage[parsedLink]
+			_, urlWasChecked := resultStorage[linkDecision.Link]
 			if urlWasChecked {
-				resultStorage[parsedLink].LinksFrom = append(resultStorage[parsedLink].LinksFrom, localResult.Page)
+				resultStorage[linkDecision.Link].LinksFrom = append(resultStorage[linkDecision.Link].LinksFrom, localResult.Page)
 				resultMutex.Unlock()
 			} else {
 				resultMutex.Unlock()
-				go ParseURL(parsedLink, realNextLevel)
+				go ParseURL(linkDecision.Link, linkDecision.NextNestLevel)
 			}
 		}
 	}
+}
+
+func GetLinkDecision(rawLink string, rawNextLevel int) LinkDecision {
+	var retLink = LinkDecision{IsValid: true, Link: rawLink, NextNestLevel: rawNextLevel}
+	if IsLinkInBlackList(rawLink) {
+		retLink.IsValid = false
+		return retLink
+	}
+	//внутренние ссылки, начинающиеся со слеша должны быть дополнены URL сайта
+	if strings.HasPrefix(rawLink, "/") {
+		retLink.Link = SITEURL + rawLink
+		return retLink
+	}
+	//внутренние ссылки с полным путем
+	if strings.HasPrefix(rawLink, SITEURL) {
+		return retLink
+	}
+	//внешние ссылки
+	if strings.HasPrefix(rawLink, SITEURL) {
+		retLink.NextNestLevel = MAX_NEST_LEVEL
+		if IGNORE_EXTERNAL_LINKS {
+			retLink.IsValid = false
+		}
+		return retLink
+	}
+	//не пойми что
+	retLink.IsValid = false
+	return retLink
+}
+
+func IsLinkInBlackList(link string) bool {
+	return false
 }
 
 func GetLink(raw string) (string, bool) {
