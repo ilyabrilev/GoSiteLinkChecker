@@ -200,8 +200,6 @@ func ParseLinkTag(i int, s *goquery.Selection, localResult PageResult, nextLevel
 	}
 	link, err := s.Attr("href")
 	if err == false {
-		//нужно ли оповещать о пустых ссылках?
-		//fmt.Println(link, err)
 		resultMutex.Lock()
 		_, urlWasChecked := resultStorage[link]
 		if urlWasChecked {
