@@ -267,6 +267,5 @@ func GetLink(raw string) (string, bool) {
 	if strings.HasPrefix(raw, conf.siteurl) {
 		return raw, true
 	}
-	//fmt.Printf("%s is not valid\n", raw)
 	return raw, false
 }
