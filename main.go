@@ -17,24 +17,38 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
-var (
-	SITEURL               string = "http://lenta.ru"
-	CHECKING_PAGE         string = "/"
-	MAX_NEST_LEVEL        int    = 3
-	SECONDS_TO_TIMEOUT    int    = 30
-	CHECK_WORKERS_OFFSET  int    = 5
-	KEEP_WORKING          bool   = false
-	IGNORE_EXTERNAL_LINKS bool   = false
-)
+type AppConfiguration struct {
+	siteurl         string
+	checkingPage    string
+	nestLevel       int
+	toTimeout       int
+	workersOffset   int
+	keepWorking     bool
+	externalLinks   bool
+	limitPageSearch int
+}
+
+var conf = AppConfiguration{
+	siteurl:         "http://lenta.ru",
+	checkingPage:    "/",
+	nestLevel:       3,
+	toTimeout:       30,
+	workersOffset:   5,
+	keepWorking:     false,
+	externalLinks:   false,
+	limitPageSearch: 30,
+}
 
 //разбор аргументов командной строки
 func init() {
-	flag.StringVar(&SITEURL, "s", SITEURL, "URL сайта")
-	flag.StringVar(&SITEURL, "p", SITEURL, "Страница для просмотра")
-	flag.IntVar(&MAX_NEST_LEVEL, "mn", MAX_NEST_LEVEL, "Максимальная глубина поиска")
-	flag.IntVar(&SECONDS_TO_TIMEOUT, "to", SECONDS_TO_TIMEOUT, "Секунд до принудительного завершения")
-	flag.IntVar(&CHECK_WORKERS_OFFSET, "wo", CHECK_WORKERS_OFFSET, "Ожидание до начала проверки на отсутствие рабочих воркеров")
-	flag.BoolVar(&KEEP_WORKING, "k", KEEP_WORKING, "Производить ли Sleep до ответа от пользователя")
+	flag.StringVar(&conf.siteurl, "s", conf.siteurl, "URL сайта")
+	flag.StringVar(&conf.siteurl, "p", conf.siteurl, "Страница для просмотра")
+	flag.IntVar(&conf.nestLevel, "mn", conf.nestLevel, "Максимальная глубина поиска")
+	flag.IntVar(&conf.toTimeout, "to", conf.toTimeout, "Секунд до принудительного завершения")
+	flag.IntVar(&conf.workersOffset, "wo", conf.workersOffset, "Ожидание до начала проверки на отсутствие рабочих воркеров")
+	flag.BoolVar(&conf.keepWorking, "k", conf.keepWorking, "Производить ли Sleep до ответа от пользователя")
+	flag.BoolVar(&conf.externalLinks, "i", conf.externalLinks, "Не проверять внешние ссылки")
+	flag.IntVar(&conf.limitPageSearch, "lp", conf.limitPageSearch, "Ограничение на проверку n ссылок на страницу (0 - нет ограничения)")
 }
 
 type PageResult struct {
@@ -72,9 +86,9 @@ func main() {
 	key_chan := make(chan os.Signal, 1)
 	signal.Notify(key_chan, os.Interrupt)
 
-	timeoutTimer := time.NewTimer(time.Duration(SECONDS_TO_TIMEOUT) * time.Second)
+	timeoutTimer := time.NewTimer(time.Duration(conf.toTimeout) * time.Second)
 
-	go ParseURL(SITEURL+CHECKING_PAGE, 0)
+	go ParseURL(conf.siteurl+conf.checkingPage, 0)
 	//RunWorkersCheck(workersAreOver)
 
 	for {
@@ -106,13 +120,13 @@ func LogResult() {
 	check(err)
 	fmt.Printf("%+v\n", resultStorage)
 	resultMutex.Unlock()
-	if KEEP_WORKING {
+	if conf.keepWorking {
 		fmt.Scan()
 	}
 }
 
 func RunWorkersCheck(exitChan chan bool) {
-	time.Sleep(time.Duration(CHECK_WORKERS_OFFSET) * time.Second)
+	time.Sleep(time.Duration(conf.workersOffset) * time.Second)
 
 	ticker := time.NewTicker(2 * time.Second)
 	go func() {
@@ -171,7 +185,7 @@ func ParseURL(url string, level int) {
 	}
 
 	var nextLevel int = level + 1
-	if nextLevel > MAX_NEST_LEVEL {
+	if nextLevel > conf.nestLevel {
 		return
 	}
 
@@ -181,7 +195,7 @@ func ParseURL(url string, level int) {
 }
 
 func ParseLinkTag(i int, s *goquery.Selection, localResult PageResult, nextLevel int) {
-	if i > 30 {
+	if (conf.limitPageSearch > 0) && (i > conf.limitPageSearch) {
 		return
 	}
 	link, err := s.Attr("href")
@@ -224,17 +238,17 @@ func GetLinkDecision(rawLink string, rawNextLevel int) LinkDecision {
 	}
 	//внутренние ссылки, начинающиеся со слеша должны быть дополнены URL сайта
 	if strings.HasPrefix(rawLink, "/") {
-		retLink.Link = SITEURL + rawLink
+		retLink.Link = conf.siteurl + rawLink
 		return retLink
 	}
 	//внутренние ссылки с полным путем
-	if strings.HasPrefix(rawLink, SITEURL) {
+	if strings.HasPrefix(rawLink, conf.siteurl) {
 		return retLink
 	}
 	//внешние ссылки
-	if strings.HasPrefix(rawLink, SITEURL) {
-		retLink.NextNestLevel = MAX_NEST_LEVEL
-		if IGNORE_EXTERNAL_LINKS {
+	if strings.HasPrefix(rawLink, conf.siteurl) {
+		retLink.NextNestLevel = conf.nestLevel
+		if conf.externalLinks {
 			retLink.IsValid = false
 		}
 		return retLink
@@ -250,9 +264,9 @@ func IsLinkInBlackList(link string) bool {
 
 func GetLink(raw string) (string, bool) {
 	if strings.HasPrefix(raw, "/") {
-		return SITEURL + raw, true
+		return conf.siteurl + raw, true
 	}
-	if strings.HasPrefix(raw, SITEURL) {
+	if strings.HasPrefix(raw, conf.siteurl) {
 		return raw, true
 	}
 	//fmt.Printf("%s is not valid\n", raw)
