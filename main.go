@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,6 +27,7 @@ type AppConfiguration struct {
 	keepWorking     bool
 	externalLinks   bool
 	limitPageSearch int
+	resultPrefix    string
 }
 
 var conf = AppConfiguration{
@@ -37,6 +39,7 @@ var conf = AppConfiguration{
 	keepWorking:     false,
 	externalLinks:   false,
 	limitPageSearch: 30,
+	resultPrefix:    "default",
 }
 
 //разбор аргументов командной строки
@@ -49,6 +52,8 @@ func init() {
 	flag.BoolVar(&conf.keepWorking, "k", conf.keepWorking, "Производить ли Sleep до ответа от пользователя")
 	flag.BoolVar(&conf.externalLinks, "i", conf.externalLinks, "Не проверять внешние ссылки")
 	flag.IntVar(&conf.limitPageSearch, "lp", conf.limitPageSearch, "Ограничение на проверку n ссылок на страницу (0 - нет ограничения)")
+	flag.StringVar(&conf.resultPrefix, "rp", conf.resultPrefix, "Префикс для сохранения результата")
+
 }
 
 type PageResult struct {
@@ -89,7 +94,6 @@ func main() {
 	timeoutTimer := time.NewTimer(time.Duration(conf.toTimeout) * time.Second)
 
 	go ParseURL(conf.siteurl+conf.checkingPage, 0)
-	//RunWorkersCheck(workersAreOver)
 
 	for {
 		select {
@@ -110,15 +114,20 @@ func main() {
 }
 
 func LogResult() {
+	const RESULT_DIR = "./results"
 	closeFlag = true
 	resultMutex.Lock()
 	resJson, _ := json.Marshal(resultStorage)
-	f, err := os.Create("./dat1.txt")
+	_, err := os.Stat(RESULT_DIR)
+	if os.IsNotExist(err) {
+		os.Mkdir(RESULT_DIR, 0666)
+	}
+	f, err := os.Create(RESULT_DIR + "/" + conf.resultPrefix + "_" + strconv.Itoa(int(time.Now().Unix())) + ".json")
 	check(err)
 	defer f.Close()
 	_, err = f.Write(resJson)
 	check(err)
-	fmt.Printf("%+v\n", resultStorage)
+	//fmt.Printf("%+v\n", resultStorage)
 	resultMutex.Unlock()
 	if conf.keepWorking {
 		fmt.Scan()
@@ -267,6 +276,5 @@ func GetLink(raw string) (string, bool) {
 	if strings.HasPrefix(raw, conf.siteurl) {
 		return raw, true
 	}
-	//fmt.Printf("%s is not valid\n", raw)
 	return raw, false
 }
