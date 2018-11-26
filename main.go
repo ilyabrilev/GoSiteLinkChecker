@@ -1,13 +1,11 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"math"
 	"net/http"
 	"os/signal"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,49 +14,9 @@ import (
 	"os"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/tkanos/gonfig"
 )
 
-type AppConfiguration struct {
-	Siteurl                string `json:"siteurl"`
-	CheckingPage           string `json:"checkingPage"`
-	NestLevel              int    `json:"nestLevel"`
-	SecToTimeout           int    `json:"secToTimeout"`
-	SecToFirstCheckWorkers int    `json:"secToFirstCheckWorkers"`
-	CloseOnFinish          bool   `json:"closeOnFinish"`
-	ExternalLinksCheck     bool   `json:"externalLinksCheck"`
-	LimitPageSearch        int    `json:"limitPageSearch"`
-	ResultPrefix           string `json:"resultPrefix"`
-}
-
-var conf = AppConfiguration{
-	Siteurl:                "http://lenta.ru",
-	CheckingPage:           "/",
-	NestLevel:              3,
-	SecToTimeout:           30,
-	SecToFirstCheckWorkers: 5,
-	CloseOnFinish:          true,
-	ExternalLinksCheck:     false,
-	LimitPageSearch:        30,
-	ResultPrefix:           "default",
-}
-
-var configFile string
-
-//разбор аргументов командной строки
-func init() {
-	flag.StringVar(&configFile, "conf", "", "Имя файла настроек, остальные параметры будут перезаписаны")
-	flag.StringVar(&conf.Siteurl, "s", conf.Siteurl, "URL сайта")
-	flag.StringVar(&conf.Siteurl, "p", conf.Siteurl, "Страница для просмотра")
-	flag.IntVar(&conf.NestLevel, "nl", conf.NestLevel, "Максимальная глубина поиска")
-	flag.IntVar(&conf.SecToTimeout, "sto", conf.SecToTimeout, "Секунд до принудительного завершения")
-	flag.IntVar(&conf.SecToFirstCheckWorkers, "wo", conf.SecToFirstCheckWorkers, "Ожидание до начала проверки на отсутствие рабочих воркеров")
-	flag.BoolVar(&conf.CloseOnFinish, "c", conf.CloseOnFinish, "Автоматическое закрытие окна при завершении")
-	flag.BoolVar(&conf.ExternalLinksCheck, "i", conf.ExternalLinksCheck, "Не проверять внешние ссылки")
-	flag.IntVar(&conf.LimitPageSearch, "lp", conf.LimitPageSearch, "Ограничение на проверку n ссылок на страницу (0 - нет ограничения)")
-	flag.StringVar(&conf.ResultPrefix, "rp", conf.ResultPrefix, "Префикс для сохранения результата")
-
-}
+var conf = AppConfiguration{}
 
 type PageResult struct {
 	Page      string   `json:"page"`
@@ -68,19 +26,10 @@ type PageResult struct {
 	LinksFrom []string `json:"linksFrom"`
 }
 
-type LinkDecision struct {
-	IsValid       bool
-	Link          string
-	NextNestLevel int
-}
-
 var closeFlag = false
-
 var resultMutex = &sync.Mutex{}
 var resultStorage = make(map[string]*PageResult)
-
 var workersAreOver = make(chan bool)
-
 var activeWorkers int64
 
 func check(e error) {
@@ -90,18 +39,10 @@ func check(e error) {
 }
 
 func main() {
-	flag.Parse()
+	conf = GetAppConfig()
 
-	if configFile != "" {
-		conf = AppConfiguration{}
-		err := gonfig.GetConf("./config/"+configFile+".json", &conf)
-		if err != nil {
-			panic(err)
-		}
-	}
-
-	key_chan := make(chan os.Signal, 1)
-	signal.Notify(key_chan, os.Interrupt)
+	ctrlCChan := make(chan os.Signal, 1)
+	signal.Notify(ctrlCChan, os.Interrupt)
 
 	timeoutTimer := time.NewTimer(time.Duration(conf.SecToTimeout) * time.Second)
 
@@ -109,16 +50,16 @@ func main() {
 
 	for {
 		select {
-		case <-key_chan:
-			fmt.Println("Stoped by Ctr+C!")
+		case <-ctrlCChan:
+			fmt.Println("Stopped by Ctr+C!")
 			LogResult()
 			return
 		case <-workersAreOver:
-			fmt.Println("Stoped by lack of workers!")
+			fmt.Println("Stopped by lack of workers!")
 			LogResult()
 			return
 		case <-timeoutTimer.C:
-			fmt.Println("Stoped by timeout!")
+			fmt.Println("Stopped by timeout!")
 			LogResult()
 			return
 		}
@@ -134,32 +75,18 @@ func LogResult() {
 	if os.IsNotExist(err) {
 		os.Mkdir(RESULT_DIR, 0666)
 	}
+
 	f, err := os.Create(RESULT_DIR + "/" + conf.ResultPrefix + "_" + strconv.Itoa(int(time.Now().Unix())) + ".json")
 	check(err)
 	defer f.Close()
+
 	_, err = f.Write(resJson)
 	check(err)
-	//fmt.Printf("%+v\n", resultStorage)
+
 	resultMutex.Unlock()
 	if !conf.CloseOnFinish {
 		fmt.Scan()
 	}
-}
-
-func RunWorkersCheck(exitChan chan bool) {
-	time.Sleep(time.Duration(conf.SecToFirstCheckWorkers) * time.Second)
-
-	ticker := time.NewTicker(2 * time.Second)
-	go func() {
-		for range ticker.C {
-			if activeWorkers < 1 {
-				fmt.Printf("Active workers: %v. Exiting\n", activeWorkers)
-				exitChan <- true
-				return
-			}
-			fmt.Printf("Active workers: %v. Continue\n", activeWorkers)
-		}
-	}()
 }
 
 func CheckIfWorkersAreOver(url string) {
@@ -247,46 +174,4 @@ func ParseLinkTag(i int, s *goquery.Selection, localResult PageResult, nextLevel
 			}
 		}
 	}
-}
-
-func GetLinkDecision(rawLink string, rawNextLevel int) LinkDecision {
-	var retLink = LinkDecision{IsValid: true, Link: rawLink, NextNestLevel: rawNextLevel}
-	if IsLinkInBlackList(rawLink) {
-		retLink.IsValid = false
-		return retLink
-	}
-	//внутренние ссылки, начинающиеся со слеша должны быть дополнены URL сайта
-	if strings.HasPrefix(rawLink, "/") {
-		retLink.Link = conf.Siteurl + rawLink
-		return retLink
-	}
-	//внутренние ссылки с полным путем
-	if strings.HasPrefix(rawLink, conf.Siteurl) {
-		return retLink
-	}
-	//внешние ссылки
-	if strings.HasPrefix(rawLink, "http") || strings.HasPrefix(rawLink, "www") {
-		retLink.NextNestLevel = conf.NestLevel
-		if conf.ExternalLinksCheck {
-			retLink.IsValid = false
-		}
-		return retLink
-	}
-	//не пойми что
-	retLink.IsValid = false
-	return retLink
-}
-
-func IsLinkInBlackList(link string) bool {
-	return false
-}
-
-func GetLink(raw string) (string, bool) {
-	if strings.HasPrefix(raw, "/") {
-		return conf.Siteurl + raw, true
-	}
-	if strings.HasPrefix(raw, conf.Siteurl) {
-		return raw, true
-	}
-	return raw, false
 }
