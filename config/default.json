@@ -1,0 +1,11 @@
+{
+  "siteurl":         "http://lenta.ru",
+  "checkingPage":    "/",
+  "nestLevel":       3,
+  "secToTimeout":    30,
+  "secToFirstCheckWorkers":   5,
+  "closeOnFinish":     true,
+  "externalLinksCheck":   false,
+  "limitPageSearch": 30,
+  "resultPrefix":    "default"
+}

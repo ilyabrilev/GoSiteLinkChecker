@@ -16,50 +16,54 @@ import (
 	"os"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/tkanos/gonfig"
 )
 
 type AppConfiguration struct {
-	siteurl         string
-	checkingPage    string
-	nestLevel       int
-	toTimeout       int
-	workersOffset   int
-	keepWorking     bool
-	externalLinks   bool
-	limitPageSearch int
-	resultPrefix    string
+	Siteurl                string `json:"siteurl"`
+	CheckingPage           string `json:"checkingPage"`
+	NestLevel              int    `json:"nestLevel"`
+	SecToTimeout           int    `json:"secToTimeout"`
+	SecToFirstCheckWorkers int    `json:"secToFirstCheckWorkers"`
+	CloseOnFinish          bool   `json:"closeOnFinish"`
+	ExternalLinksCheck     bool   `json:"externalLinksCheck"`
+	LimitPageSearch        int    `json:"limitPageSearch"`
+	ResultPrefix           string `json:"resultPrefix"`
 }
 
 var conf = AppConfiguration{
-	siteurl:         "http://lenta.ru",
-	checkingPage:    "/",
-	nestLevel:       3,
-	toTimeout:       30,
-	workersOffset:   5,
-	keepWorking:     false,
-	externalLinks:   false,
-	limitPageSearch: 30,
-	resultPrefix:    "default",
+	Siteurl:                "http://lenta.ru",
+	CheckingPage:           "/",
+	NestLevel:              3,
+	SecToTimeout:           30,
+	SecToFirstCheckWorkers: 5,
+	CloseOnFinish:          true,
+	ExternalLinksCheck:     false,
+	LimitPageSearch:        30,
+	ResultPrefix:           "default",
 }
+
+var configFile string
 
 //разбор аргументов командной строки
 func init() {
-	flag.StringVar(&conf.siteurl, "s", conf.siteurl, "URL сайта")
-	flag.StringVar(&conf.siteurl, "p", conf.siteurl, "Страница для просмотра")
-	flag.IntVar(&conf.nestLevel, "mn", conf.nestLevel, "Максимальная глубина поиска")
-	flag.IntVar(&conf.toTimeout, "to", conf.toTimeout, "Секунд до принудительного завершения")
-	flag.IntVar(&conf.workersOffset, "wo", conf.workersOffset, "Ожидание до начала проверки на отсутствие рабочих воркеров")
-	flag.BoolVar(&conf.keepWorking, "k", conf.keepWorking, "Производить ли Sleep до ответа от пользователя")
-	flag.BoolVar(&conf.externalLinks, "i", conf.externalLinks, "Не проверять внешние ссылки")
-	flag.IntVar(&conf.limitPageSearch, "lp", conf.limitPageSearch, "Ограничение на проверку n ссылок на страницу (0 - нет ограничения)")
-	flag.StringVar(&conf.resultPrefix, "rp", conf.resultPrefix, "Префикс для сохранения результата")
+	flag.StringVar(&configFile, "conf", "", "Имя файла настроек, остальные параметры будут перезаписаны")
+	flag.StringVar(&conf.Siteurl, "s", conf.Siteurl, "URL сайта")
+	flag.StringVar(&conf.Siteurl, "p", conf.Siteurl, "Страница для просмотра")
+	flag.IntVar(&conf.NestLevel, "nl", conf.NestLevel, "Максимальная глубина поиска")
+	flag.IntVar(&conf.SecToTimeout, "sto", conf.SecToTimeout, "Секунд до принудительного завершения")
+	flag.IntVar(&conf.SecToFirstCheckWorkers, "wo", conf.SecToFirstCheckWorkers, "Ожидание до начала проверки на отсутствие рабочих воркеров")
+	flag.BoolVar(&conf.CloseOnFinish, "c", conf.CloseOnFinish, "Автоматическое закрытие окна при завершении")
+	flag.BoolVar(&conf.ExternalLinksCheck, "i", conf.ExternalLinksCheck, "Не проверять внешние ссылки")
+	flag.IntVar(&conf.LimitPageSearch, "lp", conf.LimitPageSearch, "Ограничение на проверку n ссылок на страницу (0 - нет ограничения)")
+	flag.StringVar(&conf.ResultPrefix, "rp", conf.ResultPrefix, "Префикс для сохранения результата")
 
 }
 
 type PageResult struct {
 	Page      string   `json:"page"`
 	Status    int      `json:"status"`
-	NestLevel int      `json:"nestLevel"`
+	NestLevel int      `json:"NestLevel"`
 	IsValid   bool     `json:"isValid"`
 	LinksFrom []string `json:"linksFrom"`
 }
@@ -88,12 +92,20 @@ func check(e error) {
 func main() {
 	flag.Parse()
 
+	if configFile != "" {
+		conf = AppConfiguration{}
+		err := gonfig.GetConf("./config/"+configFile+".json", &conf)
+		if err != nil {
+			panic(err)
+		}
+	}
+
 	key_chan := make(chan os.Signal, 1)
 	signal.Notify(key_chan, os.Interrupt)
 
-	timeoutTimer := time.NewTimer(time.Duration(conf.toTimeout) * time.Second)
+	timeoutTimer := time.NewTimer(time.Duration(conf.SecToTimeout) * time.Second)
 
-	go ParseURL(conf.siteurl+conf.checkingPage, 0)
+	go ParseURL(conf.Siteurl+conf.CheckingPage, 0)
 
 	for {
 		select {
@@ -122,20 +134,20 @@ func LogResult() {
 	if os.IsNotExist(err) {
 		os.Mkdir(RESULT_DIR, 0666)
 	}
-	f, err := os.Create(RESULT_DIR + "/" + conf.resultPrefix + "_" + strconv.Itoa(int(time.Now().Unix())) + ".json")
+	f, err := os.Create(RESULT_DIR + "/" + conf.ResultPrefix + "_" + strconv.Itoa(int(time.Now().Unix())) + ".json")
 	check(err)
 	defer f.Close()
 	_, err = f.Write(resJson)
 	check(err)
 	//fmt.Printf("%+v\n", resultStorage)
 	resultMutex.Unlock()
-	if conf.keepWorking {
+	if !conf.CloseOnFinish {
 		fmt.Scan()
 	}
 }
 
 func RunWorkersCheck(exitChan chan bool) {
-	time.Sleep(time.Duration(conf.workersOffset) * time.Second)
+	time.Sleep(time.Duration(conf.SecToFirstCheckWorkers) * time.Second)
 
 	ticker := time.NewTicker(2 * time.Second)
 	go func() {
@@ -177,7 +189,7 @@ func ParseURL(url string, level int) {
 
 	resp, err := http.Get(url)
 	if err != nil {
-		fmt.Printf("http.Get caused an error on %s", url)
+		fmt.Printf("http.Get caused an error on %s\n", url)
 		result.IsValid = false
 		return
 	}
@@ -194,7 +206,7 @@ func ParseURL(url string, level int) {
 	}
 
 	var nextLevel int = level + 1
-	if nextLevel > conf.nestLevel {
+	if nextLevel > conf.NestLevel {
 		return
 	}
 
@@ -204,7 +216,7 @@ func ParseURL(url string, level int) {
 }
 
 func ParseLinkTag(i int, s *goquery.Selection, localResult PageResult, nextLevel int) {
-	if (conf.limitPageSearch > 0) && (i > conf.limitPageSearch) {
+	if (conf.LimitPageSearch > 0) && (i > conf.LimitPageSearch) {
 		return
 	}
 	link, err := s.Attr("href")
@@ -245,17 +257,17 @@ func GetLinkDecision(rawLink string, rawNextLevel int) LinkDecision {
 	}
 	//внутренние ссылки, начинающиеся со слеша должны быть дополнены URL сайта
 	if strings.HasPrefix(rawLink, "/") {
-		retLink.Link = conf.siteurl + rawLink
+		retLink.Link = conf.Siteurl + rawLink
 		return retLink
 	}
 	//внутренние ссылки с полным путем
-	if strings.HasPrefix(rawLink, conf.siteurl) {
+	if strings.HasPrefix(rawLink, conf.Siteurl) {
 		return retLink
 	}
 	//внешние ссылки
-	if strings.HasPrefix(rawLink, conf.siteurl) {
-		retLink.NextNestLevel = conf.nestLevel
-		if conf.externalLinks {
+	if strings.HasPrefix(rawLink, "http") || strings.HasPrefix(rawLink, "www") {
+		retLink.NextNestLevel = conf.NestLevel
+		if conf.ExternalLinksCheck {
 			retLink.IsValid = false
 		}
 		return retLink
@@ -271,9 +283,9 @@ func IsLinkInBlackList(link string) bool {
 
 func GetLink(raw string) (string, bool) {
 	if strings.HasPrefix(raw, "/") {
-		return conf.siteurl + raw, true
+		return conf.Siteurl + raw, true
 	}
-	if strings.HasPrefix(raw, conf.siteurl) {
+	if strings.HasPrefix(raw, conf.Siteurl) {
 		return raw, true
 	}
 	return raw, false
