@@ -5,12 +5,9 @@ import (
 	"math"
 	"net/http"
 	"os/signal"
-	"strconv"
-	"sync"
 	"sync/atomic"
 	"time"
 
-	"encoding/json"
 	"os"
 
 	"github.com/PuerkitoBio/goquery"
@@ -27,8 +24,9 @@ type PageResult struct {
 }
 
 var closeFlag = false
-var resultMutex = &sync.Mutex{}
-var resultStorage = make(map[string]*PageResult)
+
+//var resultMutex = &sync.Mutex{}
+var resultStorage ResultStorage //make(map[string]*PageResult)
 var workersAreOver = make(chan bool)
 var activeWorkers int64
 
@@ -40,6 +38,7 @@ func check(e error) {
 
 func main() {
 	conf = GetAppConfig()
+	resultStorage = GetResultStorage()
 
 	ctrlCChan := make(chan os.Signal, 1)
 	signal.Notify(ctrlCChan, os.Interrupt)
@@ -52,40 +51,17 @@ func main() {
 		select {
 		case <-ctrlCChan:
 			fmt.Println("Stopped by Ctr+C!")
-			LogResult()
+			resultStorage.LogResult()
 			return
 		case <-workersAreOver:
 			fmt.Println("Stopped by lack of workers!")
-			LogResult()
+			resultStorage.LogResult()
 			return
 		case <-timeoutTimer.C:
 			fmt.Println("Stopped by timeout!")
-			LogResult()
+			resultStorage.LogResult()
 			return
 		}
-	}
-}
-
-func LogResult() {
-	const RESULT_DIR = "./results"
-	closeFlag = true
-	resultMutex.Lock()
-	resJson, _ := json.Marshal(resultStorage)
-	_, err := os.Stat(RESULT_DIR)
-	if os.IsNotExist(err) {
-		os.Mkdir(RESULT_DIR, 0666)
-	}
-
-	f, err := os.Create(RESULT_DIR + "/" + conf.ResultPrefix + "_" + strconv.Itoa(int(time.Now().Unix())) + ".json")
-	check(err)
-	defer f.Close()
-
-	_, err = f.Write(resJson)
-	check(err)
-
-	resultMutex.Unlock()
-	if !conf.CloseOnFinish {
-		fmt.Scan()
 	}
 }
 
@@ -109,10 +85,8 @@ func ParseURL(url string, level int) {
 
 	fmt.Printf("Checking %s, nest level %v, active workers %v\n", url, level, activeWorkers)
 
-	resultMutex.Lock()
-	var result = PageResult{Page: url, Status: 0, NestLevel: level, IsValid: true}
-	resultStorage[url] = &result
-	resultMutex.Unlock()
+	var result = resultStorage.GetSpecResult(url)
+	result.IsValid = true
 
 	resp, err := http.Get(url)
 	if err != nil {
@@ -142,34 +116,20 @@ func ParseURL(url string, level int) {
 	})
 }
 
-func ParseLinkTag(i int, s *goquery.Selection, localResult PageResult, nextLevel int) {
+func ParseLinkTag(i int, s *goquery.Selection, localResult *PageResult, nextLevel int) {
 	if (conf.LimitPageSearch > 0) && (i > conf.LimitPageSearch) {
 		return
 	}
 	link, err := s.Attr("href")
 	if err == false {
-		resultMutex.Lock()
-		_, urlWasChecked := resultStorage[link]
-		if urlWasChecked {
-			resultStorage[link].LinksFrom = append(resultStorage[link].LinksFrom, localResult.Page)
-		} else {
-			var errResult = PageResult{Page: link, Status: 0, NestLevel: localResult.NestLevel + 1, IsValid: false}
-			resultStorage[link] = &errResult
-			resultStorage[link].LinksFrom = append(resultStorage[link].LinksFrom, localResult.Page)
-		}
-		resultMutex.Unlock()
+		resultStorage.AppendLinkFrom(link, localResult.Page)
 	} else {
 
 		var linkDecision = GetLinkDecision(link, nextLevel)
 
 		if linkDecision.IsValid {
-			resultMutex.Lock()
-			_, urlWasChecked := resultStorage[linkDecision.Link]
-			if urlWasChecked {
-				resultStorage[linkDecision.Link].LinksFrom = append(resultStorage[linkDecision.Link].LinksFrom, localResult.Page)
-				resultMutex.Unlock()
-			} else {
-				resultMutex.Unlock()
+			urlWasChecked := resultStorage.AppendLinkFrom(link, localResult.Page)
+			if !urlWasChecked {
 				go ParseURL(linkDecision.Link, linkDecision.NextNestLevel)
 			}
 		}
