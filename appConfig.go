@@ -14,7 +14,7 @@ type AppConfiguration struct {
 	SecToTimeout           int    `json:"secToTimeout"`
 	SecToFirstCheckWorkers int    `json:"secToFirstCheckWorkers"`
 	CloseOnFinish          bool   `json:"closeOnFinish"`
-	ExternalLinksCheck     bool   `json:"externalLinksCheck"`
+	ExternalLinksDontCheck bool   `json:"externalLinksCheck"`
 	LimitPageSearch        int    `json:"limitPageSearch"`
 	ResultPrefix           string `json:"resultPrefix"`
 }
@@ -28,7 +28,7 @@ func init() {
 	flag.IntVar(&conf.SecToTimeout, "sto", conf.SecToTimeout, "Секунд до принудительного завершения")
 	flag.IntVar(&conf.SecToFirstCheckWorkers, "wo", conf.SecToFirstCheckWorkers, "Ожидание до начала проверки на отсутствие рабочих воркеров")
 	flag.BoolVar(&conf.CloseOnFinish, "c", conf.CloseOnFinish, "Автоматическое закрытие окна при завершении")
-	flag.BoolVar(&conf.ExternalLinksCheck, "i", conf.ExternalLinksCheck, "Не проверять внешние ссылки")
+	flag.BoolVar(&conf.ExternalLinksDontCheck, "i", conf.ExternalLinksDontCheck, "Не проверять внешние ссылки")
 	flag.IntVar(&conf.LimitPageSearch, "lp", conf.LimitPageSearch, "Ограничение на проверку n ссылок на страницу (0 - нет ограничения)")
 	flag.StringVar(&conf.ResultPrefix, "rp", conf.ResultPrefix, "Префикс для сохранения результата")
 
@@ -42,7 +42,7 @@ func GetAppConfig() AppConfiguration {
 		SecToTimeout:           30,
 		SecToFirstCheckWorkers: 5,
 		CloseOnFinish:          true,
-		ExternalLinksCheck:     false,
+		ExternalLinksDontCheck: false,
 		LimitPageSearch:        30,
 		ResultPrefix:           "default",
 	}

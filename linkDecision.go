@@ -8,7 +8,7 @@ type LinkDecision struct {
 	NextNestLevel int
 }
 
-func GetLinkDecision(rawLink string, rawNextLevel int) LinkDecision {
+func GetLinkDecision(rawLink string, rawNextLevel int, conf AppConfiguration) LinkDecision {
 	var retLink = LinkDecision{IsValid: true, Link: rawLink, NextNestLevel: rawNextLevel}
 	if IsLinkInBlackList(rawLink) {
 		retLink.IsValid = false
@@ -26,7 +26,7 @@ func GetLinkDecision(rawLink string, rawNextLevel int) LinkDecision {
 	//внешние ссылки
 	if strings.HasPrefix(rawLink, "http") || strings.HasPrefix(rawLink, "www") {
 		retLink.NextNestLevel = conf.NestLevel
-		if conf.ExternalLinksCheck {
+		if conf.ExternalLinksDontCheck {
 			retLink.IsValid = false
 		}
 		return retLink

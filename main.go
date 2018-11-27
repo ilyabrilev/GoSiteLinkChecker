@@ -125,7 +125,7 @@ func ParseLinkTag(i int, s *goquery.Selection, localResult *PageResult, nextLeve
 		resultStorage.AppendLinkFrom(link, localResult.Page)
 	} else {
 
-		var linkDecision = GetLinkDecision(link, nextLevel)
+		var linkDecision = GetLinkDecision(link, nextLevel, conf)
 
 		if linkDecision.IsValid {
 			urlWasChecked := resultStorage.AppendLinkFrom(link, localResult.Page)
