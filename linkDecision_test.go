@@ -47,6 +47,15 @@ func TestExternalLink_DoCheck_IsValid_False(t *testing.T) {
 	}
 }
 
+func TestBlackListLink_IsValid_False(t *testing.T) {
+	var link = "https:\\black-list.com"
+	BlackListAppend(link)
+	var l = GetLinkDecision(link, 0, GetMockConf())
+	if l.IsValid != false {
+		t.Error("Expected false, got true.")
+	}
+}
+
 func TestLinkDecisionArrayDriven(t *testing.T) {
 
 	var tests = []struct {
@@ -78,14 +87,14 @@ func TestLinkDecisionArrayDriven(t *testing.T) {
 			false,
 		},
 		{
-			"external links no check",
+			"external links check",
 			"https:\\smth.com",
 			1,
 			GetMockConf,
 			true,
 		},
 		{
-			"external links check",
+			"external links no check",
 			"https:\\smth.com",
 			1,
 			func() AppConfiguration {

@@ -8,6 +8,8 @@ type LinkDecision struct {
 	NextNestLevel int
 }
 
+var blackList []string
+
 func GetLinkDecision(rawLink string, rawNextLevel int, conf AppConfiguration) LinkDecision {
 	var retLink = LinkDecision{IsValid: true, Link: rawLink, NextNestLevel: rawNextLevel}
 	if IsLinkInBlackList(rawLink) {
@@ -36,6 +38,15 @@ func GetLinkDecision(rawLink string, rawNextLevel int, conf AppConfiguration) Li
 	return retLink
 }
 
+func BlackListAppend(link string) {
+	blackList = append(blackList, link)
+}
+
 func IsLinkInBlackList(link string) bool {
+	for _, b := range blackList {
+		if b == link {
+			return true
+		}
+	}
 	return false
 }
